@@ -18,12 +18,13 @@ static int cl_open(const char *path, struct fuse_file_info *fi);
 static int cl_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info * fi);
 static void *cl_init(struct fuse_conn_info * conn);
 static void cl_destroy(void *a);
-//static int cl_truncate(const char *path, off_t size);
+static int cl_truncate(const char *path, off_t size);
 //static int cl_create(const char *path, mode_t mode, struct fuse_file_info *fi);
 static int cl_write(const char *path, const char *content, size_t size, off_t offset, struct fuse_file_info *fi);
 static int cl_mkdir(const char* path, mode_t mode);
 static int cl_mknod(const char* path, mode_t mode, dev_t dev);
 static int cl_create(const char *path, mode_t mode, struct fuse_file_info *fi);
+static int cl_unlink(const char *path);
 
 static struct fuse_operations oper = {
     .readdir = cl_readdir,
@@ -33,12 +34,13 @@ static struct fuse_operations oper = {
     .mknod = cl_mknod,
     .write = cl_write,
     .mkdir = cl_mkdir,
-    //.truncate = cl_truncate,
+    .truncate = cl_truncate,
     //.release = cl_release,
     //.flush = NULL,
     .getattr = cl_getattr,
     .destroy = cl_destroy,
-    .init = cl_init
+    .init = cl_init,
+    .unlink = cl_unlink,
     //.rename = cl_rename,
 };
 
@@ -53,15 +55,6 @@ struct Cluster
 
 typedef struct Cluster ClusterType;
 
-struct Dir
-{
-    char* path;
-    int listOfInod[10];
-    char listOfNames[10][30];
-};
-typedef struct Dir* LinkDir;
-typedef struct Dir DirType;
-//typedef struct Node* Link; 
 struct  Node
 {
     int idCluster;
@@ -69,7 +62,6 @@ struct  Node
     int isDir;
     int isEmpty;
     int index;
-    LinkDir dir;
     //int childCount;
 };
 
@@ -88,7 +80,6 @@ void writeToClusters(const char * content, LinkCl cluster);
 static LinkCl freeCluster;
 static NodeType* files[100];
 static LinkCl clusters[CLUSTERCOUNT];
-int curDir = 0;
 
 
 int main(int argc, char *argv[]) {
@@ -96,31 +87,12 @@ int main(int argc, char *argv[]) {
     return fuse_main(argc, argv, &oper, NULL);
 }
 
-/*LinkCl createClusters()
-{
-    LinkCl clusters = (LinkCl)malloc(sizeof(struct Node));
-    clusters->id = 0; 
-    clusters->content = 0;
-    clusters->nextCluster = 0;
-    return clusters;
-}*/
-
 static void *cl_init(struct fuse_conn_info * conn) {
   printf("----------------------\n");
     printf("initialize\n");
-    DirType *rootDir = (DirType *)malloc(sizeof(DirType));
-    //rootDir->listOfInod = (int *)malloc(sizeof(int)*2);
-
-    rootDir->listOfInod[0] = 1;
-    rootDir->listOfInod[1] = 2;
-    strcpy(rootDir->listOfNames[0], "/test");
-    strcpy(rootDir->listOfNames[1], "/test1");
-    rootDir->path = "/";
-    
 
     char *tmpFiles = " test 1 test1 2";
     NodeType *myDir = (NodeType *)malloc(sizeof(NodeType));
-    myDir->dir = rootDir;
     myDir->isDir = 1;
     myDir->idCluster = 0;
     
@@ -174,16 +146,8 @@ static void *cl_init(struct fuse_conn_info * conn) {
     files[1]->firstCl->nextCluster = 0;
     files[2]->firstCl->nextCluster = 0;
 
-
-    /*NodeType *myFile2 = (NodeType *)malloc(sizeof(NodeType));
-    //myFile2->name = "test2";
-    myFile2->idCluster = 0;
-    myFile2->index = 3;
-    myFile2->isEmpty = 0;
-    files[3] = myFile2;*/
     printf("Filesystem has been initialized!\n");
 
-    //cl_mknod("rr",1,1);
     return NULL;
 }
 
@@ -210,13 +174,13 @@ static int cl_getattr(const char *path, struct stat * stbuf) {
     } else if (node->isEmpty == 0) { 
       stbuf->st_mode = S_IFREG | 0444;
       stbuf->st_nlink = 1; 
-      /*int len = 0;
-      LinkCl tmpcluster = freeCluster;
+      int len = 0;
+      LinkCl tmpcluster = node->firstCl;
       while(tmpcluster != 0){
         len+=strlen(tmpcluster->content);
         tmpcluster = tmpcluster->nextCluster;
-      }*/
-      stbuf->st_size = 200;//strlen(cluster->content);
+      }
+      stbuf->st_size = len;//strlen(cluster->content);
     } else {
       printf("6666666\n");
       res = -ENOENT;
@@ -252,15 +216,12 @@ static int cl_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
     strcat(mybuf, tmpcluster->content);
     printf("%s\n", mybuf);
     tmpcluster = tmpcluster->nextCluster;
-
    } 
    char sep[10]=" ";
 
    char *istr;
    char *tmp;
    istr = strtok (mybuf,sep);
-   /*tmp=istr;
-   istr = strtok (NULL,sep);*/
    int flag = 1;
    printf("Files\n");
    printf("cl_readdir -->%s\n", mybuf);
@@ -275,19 +236,11 @@ static int cl_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
    }
   
   return 0;
-
-    // foreach file
-    //filler(buf, fileName, NULL, 0); // add filename in directory *path* to buffer
 }
 
 static int cl_open(const char *path, struct fuse_file_info * fi) {
   printf("----------------------\n");
     printf("open: %s\n", path);
-
-    /*
-      Get list of files in directory
-      ...
-    */
     /*if (strcmp(path, files[file_ind].path) != 0) 
       return -ENOENT;
       if ((fi->flags & 3) != O_RDONLY)
@@ -324,37 +277,32 @@ printf("----------------------\n");
     //size = 0;
     if(mFile->isEmpty == 1)//(strcmp(path, mFile->path) != 0) 
       return -ENOENT; 
-    //len = strlen(cluster->content);
+ 
+    LinkCl tmpcluster = mFile->firstCl;
 
-      if (1) { //offset < len
-        //if (offset + size > len) 
-          //size = len - offset; 
-        
-        LinkCl tmpcluster = mFile->firstCl;
-        //memcpy(buf,"", size); //tmpcluster->content + offset,size
-        //buf = (char *)malloc(sizeof(char)*size);
-        *buf = '\0';
-        while(tmpcluster != 0){
-          printf("%s\n", tmpcluster->content);
-          strcat(buf, tmpcluster->content);
-          printf("%s\n", buf);
-          tmpcluster = tmpcluster->nextCluster;
-          //len = strlen(tmpcluster->content);
-          //size += len;
-        }
-        strcat(buf, "\n");
-      } else size = 0; 
+    *buf = '\0';
+    while(tmpcluster != 0){
+      printf("%s\n", tmpcluster->content);
+      strcat(buf, tmpcluster->content);
+      printf("%s\n", buf);
+      tmpcluster = tmpcluster->nextCluster;
+      //len = strlen(tmpcluster->content);
+      //size += len;
+    }
+    strcat(buf, "\0");
+
     return size; 
 }
 
-/*static int cl_truncate(const char *path, off_t size) {
-    printf("!!!!!!!!!!!!!!\n");
+static int cl_truncate(const char *path, off_t size) {
+  printf("----------------------\n");
 
-    printf("truncate: Truncated successfully\n");
-    return 0;
-}*/
+  printf("truncate: Truncated successfully\n");
+  return 0;
+}
 
 /*static int cl_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    printf("----------------------\n");
     printf("cl_create: %s\n", path);
 
   return 0;
@@ -388,13 +336,13 @@ static int cl_mknod(const char* path, mode_t mode, dev_t dev)
     strcat(tmpName,str);
     printf("%s\n", tmpName);
     writeToClusters(tmpName,dirNode->firstCl);
-    return 1;
+    return 0;
 }
 
 static int cl_mkdir(const char* path, mode_t mode)
 {   
   printf("----------------------\n");
-    printf("createDir: %s\n", path);
+  printf("createDir: %s\n", path);
     char* rootPath = getRootName(path);
     NodeType *dirNode = seekConcreteFile(rootPath);
 
@@ -417,7 +365,7 @@ static int cl_mkdir(const char* path, mode_t mode)
     strcat(tmpName,str);
     printf("%s\n", tmpName);
     writeToClusters(tmpName,dirNode->firstCl);
-    return 1;       
+    return 0;       
 }
 
 
@@ -428,6 +376,78 @@ static int cl_write(const char *path, const char *content, size_t size, off_t of
     writeToClusters(content,node->firstCl);
     return 0; // Num of bytes written
 }
+static int cl_unlink(const char *path){
+  printf("----------------------\n");
+  printf("unLink: %s\n", path);
+  //удаление файла
+  NodeType *node = seekConcreteFile(path);
+  node->isEmpty = 1;
+  LinkCl tmpcluster = node->firstCl;
+
+  while(tmpcluster->nextCluster != 0){
+    tmpcluster = tmpcluster->nextCluster;
+  }
+  tmpcluster->nextCluster = freeCluster;
+  freeCluster = node->firstCl;
+
+  char *name = getName(path);
+  char *tmpName = (char * )malloc(sizeof(char)*strlen(name));
+  strcpy(tmpName,name);
+
+  //удаление из папки
+  char* rootPath = getRootName(path);
+  NodeType *dirNode = seekConcreteFile(rootPath);
+
+  tmpcluster = dirNode->firstCl;
+  int len = 0;
+  while(tmpcluster->nextCluster != 0){
+    tmpcluster->isFull = 0;
+    tmpcluster = tmpcluster->nextCluster;
+    len++;
+  }
+
+  char *dirData = (char * )malloc(sizeof(char)*len*CLUSTERSIZE);
+  char *newDirData = (char * )malloc(sizeof(char)*(len*CLUSTERSIZE - strlen(tmpName)));
+  tmpcluster = dirNode->firstCl;
+  strcpy(dirData,tmpcluster->content);
+  tmpcluster = tmpcluster->nextCluster;
+  while(tmpcluster->nextCluster != 0){
+    strcat(dirData, tmpcluster->content);
+    tmpcluster = tmpcluster->nextCluster;
+  } 
+  char sep[10]=" ";
+  char *istr;
+  char *tmp;
+  istr = strtok (dirData,sep);
+  int flag = 1; int del = 0;
+  while (istr != NULL)
+  {
+    tmp=istr;
+    printf("%s\n", tmp);
+    //if(flag > 0)
+    //  filler(buf, tmp , NULL, 0);
+
+    if(!del && strcmp(tmpName,tmp) != 0){
+      strcat(newDirData," ");
+      strcat(newDirData,tmp);
+    }else{
+      if(del)
+        del = 0;
+      else
+        del = 1;
+    }
+    flag =-flag;
+    istr = strtok (NULL,sep);
+  }
+  printf("NNEW%s\n", newDirData);
+  dirNode->firstCl->content[0] = '\0';
+  //tmpcluster->nextCluster = freeCluster;
+  //freeCluster = dirNode->firstCl->nextCluster;
+  if(newDirData != 0)
+    writeToClusters(newDirData,dirNode->firstCl);
+  return 0;
+}
+
 static int cl_rename(const char* old, const char* new){
   printf("rename \n");
   return 0;
@@ -446,7 +466,6 @@ NodeType* seekFile(NodeType *node,char* name){
   int listOfInod[10];
   char listOfNames[10][30];
   while(tmpcluster != 0){
-    //printf("seekFile mybuf--->%s\n", tmpcluster->content);
     strcat(mybuf, tmpcluster->content);
     tmpcluster = tmpcluster->nextCluster;
    } 
@@ -562,7 +581,6 @@ void writeToClusters(const char * content, LinkCl cluster){
   }
 
   printf("%s\n", content);
-  int offs = 0;
   int i, iCon = -1;
   LinkCl tmpClusterWrite = tmpCluster;
   while(iCon<len){
@@ -584,7 +602,7 @@ void writeToClusters(const char * content, LinkCl cluster){
     freeCluster  = tmpClusterWrite->nextCluster;
     tmpClusterWrite->nextCluster = 0;
   }
-  
+  tmpClusterWrite->content[i] = '\0';
 
 }
 
