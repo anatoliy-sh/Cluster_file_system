@@ -71,14 +71,24 @@ struct  Node
 typedef struct Node NodeType;
 
 //мои функции
+//поиск файла в кластерах папки
 NodeType* seekFile(NodeType* node,char* name);
+//поиск файла путем парсинга path (вызывает seekFile)
 NodeType* seekConcreteFile(const char* path);
+//создание пустых кластеров
 void createFreeClusters();
+//имя файла
 char* getName(const char* path);
+//имя дириктории в которой находится файл
 char* getRootName(const char* path);
+//запись в кластеры
 void writeToClusters(const char * content, LinkCl cluster);
+//удаление файла из кластеров и массива файлов
 void deleteFileFromCl(NodeType* node);
+//получение последнего свободного кластера (для удаления)
 LinkCl getEndCl();
+//удаление информации из дириктории
+void deleteFromDir(const char* path);
 
 
 static LinkCl freeCluster;
@@ -387,8 +397,8 @@ static int cl_unlink(const char *path){
   NodeType *node = seekConcreteFile(path);
   LinkCl tmpcluster;
   deleteFileFromCl(node);
-
-  char *name = getName(path);
+  deleteFromDir(path);
+  /*char *name = getName(path);
   char *tmpName = (char * )malloc(sizeof(char)*strlen(name));
   strcpy(tmpName,name);
 
@@ -444,13 +454,51 @@ static int cl_unlink(const char *path){
   dirNode->firstCl->nextCluster = 0;
 
   if(newDirData != 0)
-    writeToClusters(newDirData,dirNode->firstCl);
+    writeToClusters(newDirData,dirNode->firstCl);*/
   return 0;
 }
 
 static int cl_rmdir(const char *path){
   printf("----------------------\n");
   printf("rmdir: %s\n", path);
+  NodeType *dir = seekConcreteFile(path);
+  //удаление файлов
+  LinkCl tmpcluster = dir->firstCl;
+
+  char mybuf[100];
+  int listOfRmFiles[30];
+  strcpy(mybuf,tmpcluster->content);
+  tmpcluster = tmpcluster->nextCluster;
+  while(tmpcluster != 0){
+    printf("%s\n", tmpcluster->content);
+    strcat(mybuf, tmpcluster->content);
+    printf("%s\n", mybuf);
+    tmpcluster = tmpcluster->nextCluster;
+   } 
+   char sep[10]=" ";
+
+   char *istr;
+   char *tmp;
+   istr = strtok (mybuf,sep);
+   int flag = 1;
+   int ind = -1;
+   while (istr != NULL)
+   {
+      tmp=istr;
+      printf("%s\n", tmp);
+      if(flag < 0){
+        listOfRmFiles[++ind] = atoi(tmp);
+      }
+      flag =-flag;
+      istr = strtok (NULL,sep);
+   }
+   for(int i = 0; i<=ind; i++){
+    deleteFileFromCl(files[listOfRmFiles[i]]);
+   }
+   //удаление самой папки
+   deleteFileFromCl(dir);
+   deleteFromDir(path);
+
   return 0;
 }
 
@@ -461,8 +509,6 @@ static int cl_rename(const char* old, const char* new){
 
 NodeType* seekFile(NodeType *node,char* name){
 
-  //if(strcmp(path, "/") == 0)
-  //  return files[0];
   printf("seekFile %s\n", name);
 
   LinkCl tmpcluster = node->firstCl;
@@ -506,13 +552,6 @@ NodeType* seekConcreteFile(const char* path){
   printf("----------------------\n");
   if(strcmp(path, "/") == 0)
     return files[0];
-
-  /*char* name = getName(path);
-  char* name1 = (char*)malloc(sizeof(char)*strlen(name));
-  strcpy(name1,name);
-  printf("--seekConcreteFile %s\n", name1);
-  NodeType* node = seekFile(0,name1);
-  */
 
   char listOfFiles[10][30];
   int count = -1;
@@ -569,7 +608,6 @@ void createFreeClusters(){
     tmpCluster = cluster;
   }
 
-  //strncpy(freeCluster->content, "str\0", sizeof(freeCluster->content));
 }
 
 void writeToClusters(const char * content, LinkCl cluster){
@@ -589,6 +627,7 @@ void writeToClusters(const char * content, LinkCl cluster){
   printf("%s\n", content);
   int i, iCon = -1;
   LinkCl tmpClusterWrite = tmpCluster;
+  //добавление кластеров и дозапись
   while(iCon<len){
     for(i = j; i<CLUSTERSIZE; i++){
       if(iCon < len)
@@ -636,10 +675,6 @@ char* getRootName(const char* path){
   for(i = strlen(tmpPath); i>=0; i--){
     if(tmpPath[i] == '/')
       break;
-    //else
-      //printf("%s\n",tmpPath);
-      //printf("%d\n", strlen(tmpPath));
-      //printf("%c\n", tmpPath[i]);
   }
   printf("\n");
   tmpPath[i+1] = '\0';
@@ -664,4 +699,64 @@ LinkCl getEndCl(){
     tmpcluster = tmpcluster->nextCluster;
   }
   return tmpcluster;
+}
+
+void deleteFromDir(const char* path){
+  char *name = getName(path);
+  char *tmpName = (char * )malloc(sizeof(char)*strlen(name));
+  strcpy(tmpName,name);
+
+  //удаление из папки
+  char* rootPath = getRootName(path);
+  NodeType *dirNode = seekConcreteFile(rootPath);
+
+  LinkCl tmpcluster = dirNode->firstCl;
+  int len = 0;
+  while(tmpcluster->nextCluster != 0){
+    tmpcluster->isFull = 0;
+    tmpcluster = tmpcluster->nextCluster;
+    len++;
+  }
+
+  char *dirData = (char * )malloc(sizeof(char)*len*CLUSTERSIZE);
+  char *newDirData = (char * )malloc(sizeof(char)*(len*CLUSTERSIZE - strlen(tmpName)));
+  tmpcluster = dirNode->firstCl;
+  strcpy(dirData,tmpcluster->content);
+  tmpcluster = tmpcluster->nextCluster;
+  while(tmpcluster != 0){
+    strcat(dirData, tmpcluster->content);
+    tmpcluster = tmpcluster->nextCluster;
+  } 
+  printf("OLD%s\n", dirData);
+  char sep[10]=" ";
+  char *istr;
+  char *tmp;
+  istr = strtok (dirData,sep);
+  int flag = 1; int del = 0;
+  while (istr != NULL)
+  {
+    tmp=istr;
+    printf("%s\n", tmp);
+    if(!del && strcmp(tmpName,tmp) != 0){
+      strcat(newDirData," ");
+      strcat(newDirData,tmp);
+    }else{
+      if(del)
+        del = 0;
+      else
+        del = 1;
+    }
+    flag =-flag;
+    istr = strtok (NULL,sep);
+  }
+  
+  printf("NEW%s\n", newDirData);
+  dirNode->firstCl->content[0] = '\0';
+
+  tmpcluster = getEndCl();
+  tmpcluster->nextCluster = dirNode->firstCl->nextCluster;
+  dirNode->firstCl->nextCluster = 0;
+
+  if(newDirData != 0)
+    writeToClusters(newDirData,dirNode->firstCl);
 }
