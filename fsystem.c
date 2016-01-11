@@ -78,6 +78,7 @@ char* getName(const char* path);
 char* getRootName(const char* path);
 void writeToClusters(const char * content, LinkCl cluster);
 void deleteFileFromCl(NodeType* node);
+LinkCl getEndCl();
 
 
 static LinkCl freeCluster;
@@ -384,7 +385,7 @@ static int cl_unlink(const char *path){
   printf("unLink: %s\n", path);
   //удаление файла
   NodeType *node = seekConcreteFile(path);
-  LinkCl tmpcluster = node->firstCl;
+  LinkCl tmpcluster;
   deleteFileFromCl(node);
 
   char *name = getName(path);
@@ -437,8 +438,11 @@ static int cl_unlink(const char *path){
   
   printf("NEW%s\n", newDirData);
   dirNode->firstCl->content[0] = '\0';
-  //tmpcluster->nextCluster = freeCluster;
-  //freeCluster = dirNode->firstCl->nextCluster;
+
+  tmpcluster = getEndCl();
+  tmpcluster->nextCluster = dirNode->firstCl->nextCluster;
+  dirNode->firstCl->nextCluster = 0;
+
   if(newDirData != 0)
     writeToClusters(newDirData,dirNode->firstCl);
   return 0;
@@ -652,4 +656,12 @@ void deleteFileFromCl(NodeType* node){
   }
   tmpcluster->nextCluster = freeCluster;
   freeCluster = node->firstCl;
+}
+
+LinkCl getEndCl(){
+  LinkCl tmpcluster = freeCluster;
+  while(tmpcluster->nextCluster != 0){
+    tmpcluster = tmpcluster->nextCluster;
+  }
+  return tmpcluster;
 }
