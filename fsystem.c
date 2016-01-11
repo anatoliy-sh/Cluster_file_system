@@ -25,6 +25,7 @@ static int cl_mkdir(const char* path, mode_t mode);
 static int cl_mknod(const char* path, mode_t mode, dev_t dev);
 static int cl_create(const char *path, mode_t mode, struct fuse_file_info *fi);
 static int cl_unlink(const char *path);
+static int cl_rmdir(const char *path);
 
 static struct fuse_operations oper = {
     .readdir = cl_readdir,
@@ -35,6 +36,7 @@ static struct fuse_operations oper = {
     .write = cl_write,
     .mkdir = cl_mkdir,
     .truncate = cl_truncate,
+    .rmdir = cl_rmdir,
     //.release = cl_release,
     //.flush = NULL,
     .getattr = cl_getattr,
@@ -75,6 +77,7 @@ void createFreeClusters();
 char* getName(const char* path);
 char* getRootName(const char* path);
 void writeToClusters(const char * content, LinkCl cluster);
+void deleteFileFromCl(NodeType* node);
 
 
 static LinkCl freeCluster;
@@ -381,14 +384,8 @@ static int cl_unlink(const char *path){
   printf("unLink: %s\n", path);
   //удаление файла
   NodeType *node = seekConcreteFile(path);
-  node->isEmpty = 1;
   LinkCl tmpcluster = node->firstCl;
-
-  while(tmpcluster->nextCluster != 0){
-    tmpcluster = tmpcluster->nextCluster;
-  }
-  tmpcluster->nextCluster = freeCluster;
-  freeCluster = node->firstCl;
+  deleteFileFromCl(node);
 
   char *name = getName(path);
   char *tmpName = (char * )malloc(sizeof(char)*strlen(name));
@@ -411,10 +408,11 @@ static int cl_unlink(const char *path){
   tmpcluster = dirNode->firstCl;
   strcpy(dirData,tmpcluster->content);
   tmpcluster = tmpcluster->nextCluster;
-  while(tmpcluster->nextCluster != 0){
+  while(tmpcluster != 0){
     strcat(dirData, tmpcluster->content);
     tmpcluster = tmpcluster->nextCluster;
   } 
+  printf("OLD%s\n", dirData);
   char sep[10]=" ";
   char *istr;
   char *tmp;
@@ -424,9 +422,6 @@ static int cl_unlink(const char *path){
   {
     tmp=istr;
     printf("%s\n", tmp);
-    //if(flag > 0)
-    //  filler(buf, tmp , NULL, 0);
-
     if(!del && strcmp(tmpName,tmp) != 0){
       strcat(newDirData," ");
       strcat(newDirData,tmp);
@@ -439,12 +434,19 @@ static int cl_unlink(const char *path){
     flag =-flag;
     istr = strtok (NULL,sep);
   }
-  printf("NNEW%s\n", newDirData);
+  
+  printf("NEW%s\n", newDirData);
   dirNode->firstCl->content[0] = '\0';
   //tmpcluster->nextCluster = freeCluster;
   //freeCluster = dirNode->firstCl->nextCluster;
   if(newDirData != 0)
     writeToClusters(newDirData,dirNode->firstCl);
+  return 0;
+}
+
+static int cl_rmdir(const char *path){
+  printf("----------------------\n");
+  printf("rmdir: %s\n", path);
   return 0;
 }
 
@@ -639,4 +641,15 @@ char* getRootName(const char* path){
   tmpPath[i+1] = '\0';
   printf("getRootName %s\n", tmpPath);
   return tmpPath;
+}
+
+void deleteFileFromCl(NodeType* node){
+  node->isEmpty = 1;
+  LinkCl tmpcluster = node->firstCl;
+
+  while(tmpcluster->nextCluster != 0){
+    tmpcluster = tmpcluster->nextCluster;
+  }
+  tmpcluster->nextCluster = freeCluster;
+  freeCluster = node->firstCl;
 }
